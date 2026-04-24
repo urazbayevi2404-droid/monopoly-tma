@@ -14,7 +14,11 @@ export default function SetupRequired() {
   return (
     <div className="lobby-screen">
       <div className="lobby-header">
-        <div className="logo">🏙️</div>
+        <div className="brand-lockup brand-lockup-compact">
+          <div className="logo logo-image-wrap">
+            <img className="logo-image" src="/branding/logo-main.png" alt="Жаңа Адамдар" />
+          </div>
+        </div>
         <h1>Нужна настройка Firebase</h1>
         <p className="subtitle">Проект собран, но для запуска игры осталось заполнить переменные окружения.</p>
       </div>

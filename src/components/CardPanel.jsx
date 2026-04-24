@@ -9,10 +9,28 @@ function getCard(cardRef) {
   return arr?.find(c => c.id === cardRef.id) || null
 }
 
+const TYPE_META = {
+  problem: {
+    label: 'Проблема',
+    icon: '⚡',
+    note: 'Нужно быстро выбрать путь реакции.',
+  },
+  fork: {
+    label: 'Развилка',
+    icon: '🧭',
+    note: 'Есть несколько направлений, и у каждого своя цена.',
+  },
+  opportunity: {
+    label: 'Возможность',
+    icon: '🌱',
+    note: 'Можно получить бонус или открыть новый темп для партии.',
+  },
+}
+
 const PATH_EFFECTS = {
-  A: { influence: '+3 💫', city: '–2 🏙️', label: 'Пассивное решение', color: '#EF4444' },
-  B: { influence: '+2 💫', city: '+1 🏙️', label: 'Системное решение', color: '#10B981' },
-  C: { influence: '?', city: '?', label: 'Неоднозначное решение', color: '#F59E0B' },
+  A: { influence: '+3 💫', city: '−2 🏙️', label: 'Личный выигрыш', color: '#f97316' },
+  B: { influence: '+2 💫', city: '+1 🏙️', label: 'Системное решение', color: '#22c55e' },
+  C: { influence: '?', city: '?', label: 'Риск и неизвестность', color: '#8b5cf6' },
 }
 
 export default function CardPanel({ card: cardRef, phase, isMyTurn, declaredPath, onDeclare, onChallenge, room, userId }) {
@@ -21,13 +39,15 @@ export default function CardPanel({ card: cardRef, phase, isMyTurn, declaredPath
   const [showChallenge, setShowChallenge] = useState(false)
   const [timer, setTimer] = useState(12)
 
-  // Countdown for challenge window
   useEffect(() => {
     if (phase !== 'challenge_window') return
     setTimer(12)
     const iv = setInterval(() => {
       setTimer(t => {
-        if (t <= 1) { clearInterval(iv); return 0 }
+        if (t <= 1) {
+          clearInterval(iv)
+          return 0
+        }
         return t - 1
       })
     }, 1000)
@@ -35,9 +55,10 @@ export default function CardPanel({ card: cardRef, phase, isMyTurn, declaredPath
   }, [phase])
 
   if (!card) return null
+
+  const typeMeta = TYPE_META[cardRef.type]
   const isOpportunity = cardRef.type === 'opportunity'
   const bodyText = card.situation || card.description
-
   const isChallengeable = phase === 'challenge_window' && !isMyTurn
   const alreadyChallenged = room?.turn?.challenge?.active
 
@@ -55,22 +76,34 @@ export default function CardPanel({ card: cardRef, phase, isMyTurn, declaredPath
   }
 
   return (
-    <div className="card-panel">
+    <div className={`card-panel card-shell card-shell-${cardRef.type}`}>
+      <div className="card-glow" aria-hidden="true" />
       <div className={`card-header card-type-${cardRef.type}`}>
-        <span>{cardRef.type === 'problem' ? '⚡ Проблема' : cardRef.type === 'fork' ? '🔀 Развилка' : '🌱 Возможность'}</span>
+        <span className="card-type-pill">
+          <span>{typeMeta?.icon}</span>
+          {typeMeta?.label}
+        </span>
         {phase === 'challenge_window' && !alreadyChallenged && (
           <span className="challenge-timer">⏱ {timer}с</span>
         )}
       </div>
 
-      <div className="card-title">{card.title}</div>
+      <div className="card-cover">
+        <div className="card-cover-icon">{typeMeta?.icon}</div>
+        <div>
+          <div className="card-title">{card.title}</div>
+          <div className="card-note">{typeMeta?.note}</div>
+        </div>
+      </div>
+
       <div className="card-situation">{bodyText}</div>
 
-      {(card.paths) && (
+      {card.paths && (
         <div className="card-paths">
           {Object.entries(card.paths).map(([path, text]) => {
             const eff = PATH_EFFECTS[path]
             const isSelected = declaredPath === path
+
             return (
               <div key={path} className={`path-row ${isSelected ? 'selected' : ''}`} style={{ '--path-color': eff.color }}>
                 <div className="path-header">
@@ -81,6 +114,7 @@ export default function CardPanel({ card: cardRef, phase, isMyTurn, declaredPath
                     {eff.influence} · {eff.city}
                   </span>
                 </div>
+                <div className="path-label">{eff.label}</div>
                 <p className="path-text">{text}</p>
                 {isMyTurn && phase === 'reading_card' && (
                   <button
@@ -99,6 +133,7 @@ export default function CardPanel({ card: cardRef, phase, isMyTurn, declaredPath
 
       {isOpportunity && phase === 'reading_card' && (
         <div className="declared-path-notice">
+          <strong>Карточка готова к применению</strong>
           {isMyTurn ? (
             <button className="btn btn-primary" onClick={() => onDeclare()}>
               Применить карточку
@@ -111,24 +146,25 @@ export default function CardPanel({ card: cardRef, phase, isMyTurn, declaredPath
 
       {phase === 'challenge_window' && declaredPath && (
         <div className="declared-path-notice">
-          <strong>Объявлен Путь {declaredPath}</strong>
+          <strong>Объявлен путь {declaredPath}</strong>
+          <p className="card-note">Если кажется, что выбор вреден для города, его можно оспорить.</p>
           {isChallengeable && !alreadyChallenged && !showChallenge && (
             <button className="btn btn-challenge" onClick={() => setShowChallenge(true)}>
-              🗣️ Оспорить!
+              🗣️ Оспорить выбор
             </button>
           )}
-          {alreadyChallenged && <p className="challenged-note">✋ Оспаривается...</p>}
+          {alreadyChallenged && <p className="challenged-note">Идет обсуждение решения...</p>}
         </div>
       )}
 
       {showChallenge && (
         <div className="challenge-input-panel">
-          <p>Объясни в одном предложении почему этот путь неверен:</p>
+          <p>Коротко объясни, почему этот путь сейчас неверен:</p>
           <textarea
             className="challenge-textarea"
             value={challengeReason}
             onChange={e => setChallengeReason(e.target.value)}
-            placeholder="Путь A неверен потому что..."
+            placeholder="Например: путь слишком выгоден одному игроку и ухудшает положение города."
             rows={3}
             maxLength={200}
           />

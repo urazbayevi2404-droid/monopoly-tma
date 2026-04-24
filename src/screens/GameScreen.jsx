@@ -17,6 +17,18 @@ import MindsetPanel from '../components/MindsetPanel'
 import DistrictPanel from '../components/DistrictPanel'
 import WaitingRoom from '../components/WaitingRoom'
 
+const PHASE_LABELS = {
+  rolling: 'Бросок кубиков',
+  reading_card: 'Чтение карточки',
+  challenge_window: 'Окно обсуждения',
+  challenging: 'Ответ на оспаривание',
+  voting: 'Голосование',
+  buying: 'Покупка района',
+  mindset_answer: 'Ответ на вопрос',
+  mindset_voting: 'Оценка ответа',
+  resolving: 'Итог хода',
+}
+
 export default function GameScreen({ roomCode, user, onGameOver }) {
   const [room, setRoom] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -490,6 +502,7 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
 
   const currentPlayerData = room.players?.[currentPlayerId]
   const myData = room.players?.[user.id]
+  const phaseLabel = PHASE_LABELS[phase] || 'Игровая фаза'
 
   return (
     <div className="game-screen">
@@ -507,6 +520,8 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
         players={room.players}
         order={room.playerOrder}
         districts={room.districts || {}}
+        currentPlayerId={currentPlayerId}
+        myId={user.id}
       />
 
       <div className="turn-indicator">
@@ -516,7 +531,16 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
         }
       </div>
 
-      <div className="action-area">
+      <div className={`action-area phase-${phase || 'idle'}`}>
+        <div className="phase-ribbon">
+          <div>
+            <p className="phase-kicker">Сейчас происходит</p>
+            <h3>{phaseLabel}</h3>
+          </div>
+          <span className="phase-step">
+            Ход {room.turnNumber || 1} · игрок {room.currentTurnIndex + 1}/{room.playerOrder.length}
+          </span>
+        </div>
         {phase === 'rolling' && isMyTurn && (
           <DicePanel dice={room.turn?.dice} onRoll={handleRoll} isMyTurn={isMyTurn} />
         )}
@@ -603,7 +627,10 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
                   <div className={`result-icon ${room.turn?.pathResult === 'B' ? 'good' : 'bad'}`}>
                     {room.turn?.pathResult === 'B' ? '✅' : room.turn?.pathResult === 'A' ? '❌' : '🎲'}
                   </div>
-                  <h3>Путь {room.turn?.resolvedPath}</h3>
+                  <h3>{room.turn?.resultTitle || `Путь ${room.turn?.resolvedPath || ''}`}</h3>
+                  {room.turn?.resultText && (
+                    <p className="result-text">{room.turn.resultText}</p>
+                  )}
                   <div className="result-deltas">
                     <span className={room.turn?.influenceDelta > 0 ? 'positive' : 'negative'}>
                       💫 {room.turn?.influenceDelta > 0 ? '+' : ''}{room.turn?.influenceDelta} Влияния
