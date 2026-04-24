@@ -15,8 +15,12 @@ export default function SetupRequired() {
     <div className="lobby-screen">
       <div className="lobby-header">
         <div className="brand-lockup brand-lockup-compact">
-          <div className="logo logo-image-wrap">
-            <img className="logo-image" src="/branding/logo-main.png" alt="Жаңа Адамдар" />
+          <div className="brand-wordmark-box">
+            <div className="brand-overline">community movement game</div>
+            <div className="brand-wordmark-row">
+              <div className="brand-wordmark">ZHANA</div>
+              <div className="brand-wordmark brand-wordmark-accent">ADAMDAR</div>
+            </div>
           </div>
         </div>
         <h1>Нужна настройка Firebase</h1>

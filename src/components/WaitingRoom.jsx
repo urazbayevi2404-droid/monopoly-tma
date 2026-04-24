@@ -17,8 +17,12 @@ export default function WaitingRoom({ room, roomCode, user, isHost, onStart }) {
     <div className="waiting-screen">
       <div className="waiting-header">
         <div className="brand-lockup brand-lockup-compact">
-          <div className="logo logo-image-wrap">
-            <img className="logo-image" src="/branding/logo-main.png" alt="Жаңа Адамдар" />
+          <div className="brand-wordmark-box">
+            <div className="brand-overline">community movement game</div>
+            <div className="brand-wordmark-row">
+              <div className="brand-wordmark">ZHANA</div>
+              <div className="brand-wordmark brand-wordmark-accent">ADAMDAR</div>
+            </div>
           </div>
         </div>
         <h1>🏙️ Наш Город</h1>

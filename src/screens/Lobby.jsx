@@ -108,11 +108,16 @@ export default function Lobby({ user, onJoin }) {
     <div className="lobby-screen">
       <div className="lobby-header">
         <div className="brand-lockup">
-          <div className="logo logo-image-wrap">
-            <img className="logo-image" src="/branding/logo-main.png" alt="Жаңа Адамдар" />
+          <div className="brand-wordmark-box">
+            <div className="brand-overline">community movement game</div>
+            <div className="brand-wordmark-row">
+              <div className="brand-wordmark">ZHANA</div>
+              <div className="brand-wordmark brand-wordmark-accent">ADAMDAR</div>
+            </div>
           </div>
           <div className="brand-mark-card">
-            <img className="brand-mark-image" src="/branding/logo-mark.png" alt="Логотип ЖА" />
+            <span className="brand-mark-text">ZA</span>
+            <span className="brand-mark-subtext">city play</span>
           </div>
         </div>
         <div className="hero-kicker">Жаңа Адамдар · городская настольная игра</div>
