@@ -1,71 +1,105 @@
+import { haptic } from '../telegram'
+
+const MAX_PLAYERS = 8
+
+const PLAYER_COLORS = [
+  '#F5C842', '#A78BFA', '#34D399', '#F87171',
+  '#60A5FA', '#FB923C', '#F472B6', '#22D3EE',
+]
+
 export default function WaitingRoom({ room, roomCode, user, isHost, onStart }) {
   const players = Object.values(room.players || {})
-  const shareText = `Играем в «Наш Город — Жаңа Адамдар»!\nКод комнаты: ${roomCode}`
 
-  function share() {
+  function shareRoom() {
+    haptic('light')
+    const text = `Играем в "Наш Город"! Код комнаты: ${roomCode}`
+
     if (navigator.share) {
-      navigator.share({ text: shareText })
-    } else if (window.Telegram?.WebApp?.openTelegramLink) {
-      window.Telegram.WebApp.switchInlineQuery(roomCode, ['users'])
-    } else {
-      navigator.clipboard?.writeText(roomCode)
-      alert(`Код скопирован: ${roomCode}`)
+      navigator.share({ text }).catch(() => {})
+      return
     }
+
+    if (window.Telegram?.WebApp?.switchInlineQuery) {
+      window.Telegram.WebApp.switchInlineQuery(roomCode, ['users'])
+      return
+    }
+
+    navigator.clipboard?.writeText(roomCode).catch(() => {})
   }
 
   return (
-    <div className="waiting-screen">
-      <div className="waiting-header">
-        <div className="brand-lockup brand-lockup-compact">
-          <div className="brand-wordmark-box">
-            <div className="brand-overline">community movement game</div>
-            <div className="brand-wordmark-row">
-              <div className="brand-wordmark">ZHANA</div>
-              <div className="brand-wordmark brand-wordmark-accent">ADAMDAR</div>
-            </div>
-          </div>
+    <div className="waiting-screen screen-fade-in">
+      <section className="waiting-header">
+        <p className="eyebrow">Лобби ожидания</p>
+        <div className="brand-wordmark-row center">
+          <span className="brand-wordmark">ZHANA</span>
+          <span className="brand-wordmark brand-wordmark-accent">ADAMDAR</span>
         </div>
-        <h1>🏙️ Наш Город</h1>
-        <p>Комната ожидания</p>
-      </div>
+        <h1>Соберите команду перед стартом</h1>
+        <p>Хост запускает партию, когда в комнате будет минимум два игрока.</p>
+      </section>
 
-      <div className="room-code-block">
-        <p className="code-label">Код комнаты</p>
+      <section className="room-code-block">
+        <span className="code-label">Код комнаты</span>
         <div className="room-code">{roomCode}</div>
-        <button className="btn btn-secondary" onClick={share}>
-          📤 Поделиться кодом
+        <button className="btn btn-secondary" onClick={shareRoom}>
+          Поделиться кодом
         </button>
-      </div>
+      </section>
 
-      <div className="players-waiting">
-        <h3>Игроки ({players.length}/8)</h3>
+      <section className="players-waiting">
+        <div className="waiting-section-head">
+          <div>
+            <p className="eyebrow">Игроки</p>
+            <h2>{players.length}/{MAX_PLAYERS} в комнате</h2>
+          </div>
+          <span className="waiting-chip">{players.length >= 2 ? 'Можно стартовать' : 'Ждём ещё игроков'}</span>
+        </div>
+
         <div className="players-list-waiting">
-          {players.map(p => (
-            <div key={p.id} className="player-waiting-row">
-              <div className="player-avatar-sm">{p.name[0].toUpperCase()}</div>
-              <span>{p.name}{p.id === room.hostId ? ' 👑' : ''}{p.id === user.id ? ' (ты)' : ''}</span>
-              <span className="ready-dot">●</span>
+          {players.map((player, index) => (
+            <article key={player.id} className="player-waiting-row" style={{ animationDelay: `${index * 0.09}s` }}>
+              <div className="player-avatar-sm" style={{ '--avatar-color': PLAYER_COLORS[index % PLAYER_COLORS.length] }}>
+                {player.name[0]?.toUpperCase()}
+              </div>
+              <div className="player-meta">
+                <strong>
+                  {player.name}
+                  {player.id === user.id ? ' • ты' : ''}
+                </strong>
+                <span>{player.id === room.hostId ? 'Хост комнаты' : 'Подключён к лобби'}</span>
+              </div>
+              <div className="ready-dot" />
+            </article>
+          ))}
+
+          {Array.from({ length: Math.max(0, MAX_PLAYERS - players.length) }).map((_, index) => (
+            <div key={index} className="empty-slot">
+              <div className="empty-slot-circle" />
+              <span className="empty-slot-text">Свободный слот игрока</span>
             </div>
           ))}
         </div>
-      </div>
+      </section>
 
       {isHost ? (
-        <div className="host-actions">
-          <p className="hint">Когда все зашли — нажми «Начать»</p>
-          <button
-            className="btn btn-primary btn-lg"
-            onClick={onStart}
-            disabled={players.length < 2}
-          >
-            {players.length < 2 ? 'Нужно минимум 2 игрока' : '▶️ Начать игру'}
-          </button>
-        </div>
+        <section className="waiting-cta">
+          <p className="hint">
+            {players.length >= 2
+              ? 'Состав собран. Можно запускать карту и первый ход.'
+              : 'Как только зайдёт ещё один человек, кнопка старта активируется.'}
+          </p>
+          {players.length >= 2 && (
+            <button className="btn btn-primary btn-lg start-ready" onClick={() => { haptic('medium'); onStart() }}>
+              Начать игру
+            </button>
+          )}
+        </section>
       ) : (
-        <div className="waiting-msg">
+        <section className="waiting-banner">
           <div className="spinner-sm" />
-          <p>Ждём пока хост начнёт игру...</p>
-        </div>
+          <p>Ждём, пока хост откроет игру для всех.</p>
+        </section>
       )}
     </div>
   )

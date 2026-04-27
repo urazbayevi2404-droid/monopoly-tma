@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { getTelegramUser } from './telegram'
 import { hasFirebaseConfig } from './firebase'
 import Lobby from './screens/Lobby'
@@ -6,9 +6,23 @@ import GameScreen from './screens/GameScreen'
 import GameOver from './screens/GameOver'
 import SetupRequired from './screens/SetupRequired'
 
+function BrandedLoading() {
+  return (
+    <div className="loading-screen branded-loading">
+      <div className="brand-overline">community movement game</div>
+      <div className="brand-wordmark-row center">
+        <span className="brand-wordmark">ZHANA</span>
+        <span className="brand-wordmark brand-wordmark-accent">ADAMDAR</span>
+      </div>
+      <div className="spinner" />
+      <p>Запускаем городскую сессию...</p>
+    </div>
+  )
+}
+
 export default function App() {
   const [user, setUser] = useState(null)
-  const [screen, setScreen] = useState('lobby') // lobby | game | gameover
+  const [screen, setScreen] = useState('lobby')
   const [roomCode, setRoomCode] = useState(null)
 
   useEffect(() => {
@@ -21,19 +35,17 @@ export default function App() {
   }
 
   if (!user) {
-    return (
-      <div className="loading-screen">
-        <div className="spinner" />
-        <p>Загрузка...</p>
-      </div>
-    )
+    return <BrandedLoading />
   }
 
   if (screen === 'lobby') {
     return (
       <Lobby
         user={user}
-        onJoin={code => { setRoomCode(code); setScreen('game') }}
+        onJoin={code => {
+          setRoomCode(code)
+          setScreen('game')
+        }}
       />
     )
   }
@@ -52,7 +64,10 @@ export default function App() {
     <GameOver
       roomCode={roomCode}
       user={user}
-      onPlayAgain={() => { setRoomCode(null); setScreen('lobby') }}
+      onPlayAgain={() => {
+        setRoomCode(null)
+        setScreen('lobby')
+      }}
     />
   )
 }

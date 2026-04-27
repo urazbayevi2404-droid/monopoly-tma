@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { db, ref, onValue, update, get } from '../firebase'
 import { safeUpdate, safeGet, getErrorMessage } from '../firebase-utils'
 import {
   createInitialGameState, rollDice, getNewPosition, passedStart,
-  drawCard, getPathResult, calcRent, checkEndConditions, applyEffects, cellLabel,
+  drawCard, getPathResult, checkEndConditions, applyEffects,
 } from '../game/logic'
 import { BOARD, DISTRICT_CONFIG } from '../data/board'
 import { OPPORTUNITY_CARDS } from '../data/cards'
+import { playSfx } from '../game/sfx'
+import { haptic } from '../telegram'
 import CityTrack from '../components/CityTrack'
 import PlayerList from '../components/PlayerList'
 import BoardStrip from '../components/BoardStrip'
@@ -17,24 +19,42 @@ import MindsetPanel from '../components/MindsetPanel'
 import DistrictPanel from '../components/DistrictPanel'
 import WaitingRoom from '../components/WaitingRoom'
 
-const PHASE_LABELS = {
-  rolling: 'Бросок кубиков',
-  reading_card: 'Чтение карточки',
-  challenge_window: 'Окно обсуждения',
-  challenging: 'Ответ на оспаривание',
-  voting: 'Голосование',
-  buying: 'Покупка района',
-  mindset_answer: 'Ответ на вопрос',
-  mindset_voting: 'Оценка ответа',
-  resolving: 'Итог хода',
+const PHASE_META = {
+  rolling: { title: 'Бросок кубиков', note: 'Ход начинается с движения по карте.' },
+  reading_card: { title: 'Карточка события', note: 'Выбери направление или активируй бонус.' },
+  challenge_window: { title: 'Окно возражений', note: 'Остальные игроки ещё могут вмешаться.' },
+  challenging: { title: 'Ответ на спор', note: 'Активный игрок объясняет свою позицию.' },
+  voting: { title: 'Голосование', note: 'Комната решает, чей аргумент сильнее.' },
+  buying: { title: 'Покупка района', note: 'Район можно закрепить за собой прямо сейчас.' },
+  mindset_answer: { title: 'Проверка мышления', note: 'Нужен короткий и уверенный ответ.' },
+  mindset_voting: { title: 'Оценка ответа', note: 'Игроки голосуют, насколько ответ попал в суть.' },
+  resolving: { title: 'Итог хода', note: 'Фиксируем результат и передаём ход дальше.' },
+}
+
+function PhaseSheet({ title, subtitle, children, dockOpen, onToggle }) {
+  return (
+    <div className={`phase-sheet ${dockOpen ? 'is-open' : 'is-collapsed'}`}>
+      <button className="phase-sheet-handle" onClick={onToggle} aria-label="Переключить панель хода" />
+      <div className="phase-sheet-head">
+        <div>
+          <p className="eyebrow">Сейчас происходит</p>
+          <h3>{title}</h3>
+          <p>{subtitle}</p>
+        </div>
+      </div>
+      {dockOpen && <div className="phase-sheet-body">{children}</div>}
+    </div>
+  )
 }
 
 export default function GameScreen({ roomCode, user, onGameOver }) {
   const [room, setRoom] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [diceToast, setDiceToast] = useState(null)
+  const [sheetOpen, setSheetOpen] = useState(true)
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('city_game_sound') !== 'off')
 
-  // Слушаем состояние комнаты в Firebase
   useEffect(() => {
     const unsubscribe = onValue(ref(db, `rooms/${roomCode}`), snap => {
       if (snap.exists()) {
@@ -42,14 +62,14 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
         setLoading(false)
         setError('')
       }
-    }, (err) => {
+    }, err => {
       setError(getErrorMessage(err))
       setLoading(false)
     })
+
     return () => unsubscribe()
   }, [roomCode])
 
-  // Проверяем конец игры
   useEffect(() => {
     if (!room || room.status !== 'playing') return
     const end = checkEndConditions(room)
@@ -60,51 +80,72 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
     }
   }, [room, roomCode, onGameOver])
 
+  useEffect(() => {
+    if (!room?.turn?.phase) return
+    setSheetOpen(true)
+  }, [room?.turn?.phase, room?.turn?.card?.id])
+
+  useEffect(() => {
+    localStorage.setItem('city_game_sound', soundEnabled ? 'on' : 'off')
+  }, [soundEnabled])
+
   const isHost = room?.hostId === user.id
   const gameStarted = room?.status === 'playing'
   const currentPlayerId = gameStarted ? room.playerOrder?.[room.currentTurnIndex] : null
+  const currentPlayerData = room?.players?.[currentPlayerId]
   const isMyTurn = currentPlayerId === user.id
   const phase = room?.turn?.phase
+  const phaseMeta = PHASE_META[phase] || { title: 'Фаза хода', note: 'Следи за развитием партии.' }
+  const myData = room?.players?.[user.id]
+
+  const districtCell = useMemo(() => {
+    if (!currentPlayerData) return null
+    return BOARD[currentPlayerData.position]
+  }, [currentPlayerData])
 
   function getOpportunityCard(cardId) {
     return OPPORTUNITY_CARDS.find(card => card.id === cardId) || null
   }
 
-  // Запустить игру (только хост)
   async function startGame() {
     try {
       const snap = await safeGet(`rooms/${roomCode}`)
-      const r = snap.val()
-      const playerCount = Object.keys(r.players || {}).length
-      if (playerCount < 2) { alert('Нужно минимум 2 игрока!'); return }
+      const currentRoom = snap.val()
+      const count = Object.keys(currentRoom.players || {}).length
+      if (count < 2) {
+        alert('Нужно минимум 2 игрока')
+        return
+      }
 
-      const initialState = createInitialGameState(r.players, r.hostId)
-      await safeUpdate(`rooms/${roomCode}`, initialState)
+      playSfx('turn', soundEnabled)
+      await safeUpdate(`rooms/${roomCode}`, createInitialGameState(currentRoom.players, currentRoom.hostId))
     } catch (err) {
       setError(getErrorMessage(err))
     }
   }
 
-  // Бросить кубик (только текущий игрок)
   async function handleRoll() {
     if (!isMyTurn || phase !== 'rolling') return
+
+    haptic('medium')
+    playSfx('roll', soundEnabled)
+
     const dice = rollDice()
     const diceSum = dice[0] + dice[1]
-    const oldPos = room.players[user.id].position
-    const newPos = getNewPosition(oldPos, diceSum)
-    const cell = BOARD[newPos]
-    const startBonus = passedStart(oldPos, newPos) ? 2 : 0
+    const oldPosition = room.players[user.id].position
+    const newPosition = getNewPosition(oldPosition, diceSum)
+    const cell = BOARD[newPosition]
+    const startBonus = passedStart(oldPosition, newPosition) ? 2 : 0
 
     const updates = {
-      [`rooms/${roomCode}/players/${user.id}/position`]: newPos,
+      [`rooms/${roomCode}/players/${user.id}/position`]: newPosition,
       [`rooms/${roomCode}/turn/dice`]: dice,
       [`rooms/${roomCode}/turn/phase`]: 'cell_action',
       [`rooms/${roomCode}/turn/phaseStartedAt`]: Date.now(),
     }
 
     if (startBonus > 0) {
-      const newInfluence = (room.players[user.id].influence || 0) + startBonus
-      updates[`rooms/${roomCode}/players/${user.id}/influence`] = newInfluence
+      updates[`rooms/${roomCode}/players/${user.id}/influence`] = (room.players[user.id].influence || 0) + startBonus
     }
 
     try {
@@ -114,21 +155,22 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
       return
     }
 
-    // Немедленно обработать простые клетки
-    setTimeout(() => resolveCellAction(cell, newPos), 300)
+    setDiceToast(diceSum)
+    window.setTimeout(() => setDiceToast(null), 1500)
+    window.setTimeout(() => resolveCellAction(cell), 320)
   }
 
-  async function resolveCellAction(cell, pos) {
+  async function resolveCellAction(cell) {
     if (cell.type === 'start') {
       await advanceTurn()
     } else if (cell.type === 'crisis') {
       await applyCrisis()
     } else if (cell.type === 'district') {
-      const dist = room.districts?.[pos]
-      if (!dist?.owner) {
+      const district = room.districts?.[cell.id]
+      if (!district?.owner) {
         await update(ref(db, `rooms/${roomCode}/turn`), { phase: 'buying', phaseStartedAt: Date.now() })
-      } else if (dist.owner !== user.id) {
-        await applyRent(pos, dist.owner)
+      } else if (district.owner !== user.id) {
+        await applyRent(cell.id, district.owner)
       } else {
         await advanceTurn()
       }
@@ -168,14 +210,14 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
   }
 
   async function applyCrisis() {
-    const updates = { 'cityLevel': Math.max(0, room.cityLevel - 2) }
     const newPlayers = {}
-    for (const pid of room.playerOrder) {
-      newPlayers[pid] = {
-        ...room.players[pid],
-        influence: Math.max(0, room.players[pid].influence - 1),
+    for (const playerId of room.playerOrder) {
+      newPlayers[playerId] = {
+        ...room.players[playerId],
+        influence: Math.max(0, room.players[playerId].influence - 1),
       }
     }
+
     await update(ref(db, `rooms/${roomCode}`), {
       cityLevel: Math.max(0, (room.cityLevel || 10) - 2),
       players: newPlayers,
@@ -187,46 +229,50 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
 
   async function applyRent(cellId, ownerId) {
     const cell = BOARD[cellId]
-    const cfg = DISTRICT_CONFIG[cell.group]
-    const ownerCells = BOARD.filter(c => c.type === 'district' && c.group === cell.group)
-    const hasMonopoly = ownerCells.every(c => (room.districts?.[c.id]?.owner) === ownerId)
-    const amount = Math.min(
-      hasMonopoly ? cfg.monopolyRent : cfg.rent,
-      room.players[user.id].influence
-    )
+    const config = DISTRICT_CONFIG[cell.group]
+    const ownerCells = BOARD.filter(boardCell => boardCell.type === 'district' && boardCell.group === cell.group)
+    const hasMonopoly = ownerCells.every(boardCell => room.districts?.[boardCell.id]?.owner === ownerId)
+    const amount = Math.min(hasMonopoly ? config.monopolyRent : config.rent, room.players[user.id].influence)
 
     await update(ref(db, `rooms/${roomCode}/players`), {
       [user.id]: { ...room.players[user.id], influence: Math.max(0, room.players[user.id].influence - amount) },
       [ownerId]: { ...room.players[ownerId], influence: (room.players[ownerId].influence || 0) + amount },
     })
+
     await advanceTurn()
   }
 
-  // Объявить путь
   async function declarePath(path) {
     if (!isMyTurn || phase !== 'reading_card') return
+    haptic('light')
+
     await update(ref(db, `rooms/${roomCode}/turn`), {
       phase: 'challenge_window',
       declaredPath: path,
       phaseStartedAt: Date.now(),
       challenge: {
-        active: false, challengerId: null, reason: null,
-        response: null, votes: {}, result: null,
+        active: false,
+        challengerId: null,
+        reason: null,
+        response: null,
+        votes: {},
+        result: null,
       },
     })
-    // Автоматически закрыть окно оспаривания через 12 секунд если не оспорено
-    setTimeout(async () => {
+
+    window.setTimeout(async () => {
       const snap = await get(ref(db, `rooms/${roomCode}/turn`))
-      const t = snap.val()
-      if (t?.phase === 'challenge_window' && !t?.challenge?.active) {
-        await resolvePath(t.declaredPath, false, null)
+      const turn = snap.val()
+      if (turn?.phase === 'challenge_window' && !turn?.challenge?.active) {
+        await resolvePath(turn.declaredPath, false, null)
       }
     }, 12000)
   }
 
-  // Оспорить выбор
   async function challengePath(reason) {
     if (isMyTurn || phase !== 'challenge_window' || !reason.trim()) return
+    haptic('medium')
+
     await update(ref(db, `rooms/${roomCode}/turn`), {
       phase: 'challenging',
       'challenge/active': true,
@@ -236,74 +282,60 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
     })
   }
 
-  // Ответить на оспаривание (активный игрок)
   async function respondToChallenge(response) {
     if (!isMyTurn || phase !== 'challenging') return
+    haptic('light')
+
     await update(ref(db, `rooms/${roomCode}/turn`), {
       phase: 'voting',
       'challenge/response': response,
       phaseStartedAt: Date.now(),
     })
-    // Закрыть голосование через 25 секунд
-    setTimeout(async () => {
+
+    window.setTimeout(async () => {
       const snap = await get(ref(db, `rooms/${roomCode}/turn`))
-      const t = snap.val()
-      if (t?.phase === 'voting') {
-        await resolveVote(t)
-      }
+      const turn = snap.val()
+      if (turn?.phase === 'voting') await resolveVote(turn)
     }, 25000)
   }
 
-  // Проголосовать
   async function vote(voteValue) {
     if (isMyTurn || phase !== 'voting') return
-    if (room.turn?.challenge?.challengerId === user.id) return // challenger не голосует
-    await update(ref(db, `rooms/${roomCode}/turn/challenge/votes`), {
-      [user.id]: voteValue,
-    })
+    if (room.turn?.challenge?.challengerId === user.id) return
 
-    // Проверить все ли проголосовали
+    haptic('light')
+    await update(ref(db, `rooms/${roomCode}/turn/challenge/votes`), { [user.id]: voteValue })
+
     const snap = await get(ref(db, `rooms/${roomCode}/turn`))
-    const t = snap.val()
-    const voters = room.playerOrder.filter(pid =>
-      pid !== currentPlayerId && pid !== t.challenge.challengerId
-    )
-    const votedCount = Object.keys(t.challenge.votes || {}).length
-    if (votedCount >= voters.length) {
-      await resolveVote(t)
+    const turn = snap.val()
+    const voters = room.playerOrder.filter(playerId => playerId !== currentPlayerId && playerId !== turn.challenge.challengerId)
+    if (Object.keys(turn.challenge.votes || {}).length >= voters.length) {
+      await resolveVote(turn)
     }
   }
 
   async function resolveVote(turnState) {
     const votes = turnState.challenge?.votes || {}
-    const challengeVotes = Object.values(votes).filter(v => v === 'challenge').length
-    const originalVotes = Object.values(votes).filter(v => v === 'original').length
-    const challengeWon = challengeVotes > originalVotes
+    const challengeWon = Object.values(votes).filter(value => value === 'challenge').length >
+      Object.values(votes).filter(value => value === 'original').length
+    const challengerId = turnState.challenge.challengerId
 
-    // Бонус/штраф оспаривателю
-    const cid = turnState.challenge.challengerId
-    const challenger = room.players[cid]
-    const challengerInfluenceDelta = challengeWon ? 1 : -1
-    await update(ref(db, `rooms/${roomCode}/players/${cid}`), {
-      influence: Math.max(0, (challenger.influence || 0) + challengerInfluenceDelta),
+    await update(ref(db, `rooms/${roomCode}/players/${challengerId}`), {
+      influence: Math.max(0, (room.players[challengerId].influence || 0) + (challengeWon ? 1 : -1)),
     })
 
     const finalPath = challengeWon
       ? (turnState.declaredPath === 'A' ? 'B' : 'A')
       : turnState.declaredPath
 
-    await resolvePath(finalPath, challengeWon, turnState.challenge.challengerId)
+    await resolvePath(finalPath, challengeWon, challengerId)
   }
 
-  async function resolvePath(path, challengeWon, challengerId) {
-    let diceForC = null
-    if (path === 'C') {
-      diceForC = Math.ceil(Math.random() * 6)
-    }
-    const { influenceDelta, cityDelta, pathResult } = getPathResult(
-      path, diceForC, room.turn?.pathCInvested || false
-    )
+  async function resolvePath(path) {
+    let diceForPathC = null
+    if (path === 'C') diceForPathC = Math.ceil(Math.random() * 6)
 
+    const { influenceDelta, cityDelta, pathResult } = getPathResult(path, diceForPathC, room.turn?.pathCInvested || false)
     const newInfluence = Math.max(0, (room.players[currentPlayerId]?.influence || 0) + influenceDelta)
     const newCity = Math.max(0, Math.min(20, (room.cityLevel || 10) + cityDelta))
     const pathBCount = pathResult === 'B'
@@ -316,7 +348,7 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
       [`players/${currentPlayerId}/influence`]: newInfluence,
       [`players/${currentPlayerId}/pathBCount`]: pathBCount,
       'turn/phase': 'resolving',
-      'turn/pathCDice': diceForC,
+      'turn/pathCDice': diceForPathC,
       'turn/resolvedPath': path,
       'turn/pathResult': pathResult,
       'turn/influenceDelta': influenceDelta,
@@ -330,19 +362,16 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
   async function resolveOpportunity() {
     if (!isMyTurn || phase !== 'reading_card' || room.turn?.card?.type !== 'opportunity') return
 
+    haptic('medium')
     const card = getOpportunityCard(room.turn.card.id)
     if (!card) {
-      setError('Не удалось найти карточку возможности')
+      setError('Карточка не найдена')
       return
     }
 
-    const effects = typeof card.effect === 'function'
-      ? (card.effect(room, currentPlayerId) || [])
-      : []
-
+    const effects = typeof card.effect === 'function' ? (card.effect(room, currentPlayerId) || []) : []
     const result = applyEffects(effects, room.players, room.cityLevel || 10)
-    const influenceDelta =
-      (result.players[currentPlayerId]?.influence || 0) - (room.players[currentPlayerId]?.influence || 0)
+    const influenceDelta = (result.players[currentPlayerId]?.influence || 0) - (room.players[currentPlayerId]?.influence || 0)
     const cityDelta = result.cityLevel - (room.cityLevel || 10)
 
     await update(ref(db, `rooms/${roomCode}`), {
@@ -355,34 +384,45 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
       'turn/cityDelta': cityDelta,
       'turn/resultTitle': card.title,
       'turn/resultText': typeof card.effect === 'function'
-        ? 'Эффект карточки применен.'
-        : 'Эта карточка пока не автоматизирована. Ход продолжен без эффекта.',
+        ? 'Эффект карточки успешно применён.'
+        : 'Эта карточка пока показана без автоматического эффекта.',
       'turn/phaseStartedAt': Date.now(),
     })
   }
 
   async function buyDistrict() {
     if (!isMyTurn || phase !== 'buying') return
-    const pos = room.players[user.id].position
-    const cell = BOARD[pos]
-    const cfg = DISTRICT_CONFIG[cell.group]
-    if (room.players[user.id].influence < cfg.price) { alert('Недостаточно Влияния'); return }
+
+    haptic('heavy')
+    playSfx('buy', soundEnabled)
+
+    const position = room.players[user.id].position
+    const cell = BOARD[position]
+    const config = DISTRICT_CONFIG[cell.group]
+
+    if (room.players[user.id].influence < config.price) {
+      alert('Недостаточно влияния')
+      return
+    }
 
     await update(ref(db, `rooms/${roomCode}`), {
-      [`players/${user.id}/influence`]: room.players[user.id].influence - cfg.price,
-      [`districts/${pos}/owner`]: user.id,
+      [`players/${user.id}/influence`]: room.players[user.id].influence - config.price,
+      [`districts/${position}/owner`]: user.id,
       'turn/phase': 'done',
     })
+
     await advanceTurn()
   }
 
   async function skipBuying() {
     if (!isMyTurn || phase !== 'buying') return
+    haptic('light')
     await advanceTurn()
   }
 
   async function finishResolving() {
     if (!isMyTurn || phase !== 'resolving') return
+    haptic('light')
     await advanceTurn()
   }
 
@@ -400,6 +440,8 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
       onGameOver()
       return
     }
+
+    playSfx('turn', soundEnabled)
 
     await update(ref(db, `rooms/${roomCode}`), {
       currentTurnIndex: nextIndex,
@@ -424,65 +466,204 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
     })
   }
 
-  // Ответ на сбой мышления
   async function submitMindsetAnswer(answer) {
     if (!isMyTurn || phase !== 'mindset_answer') return
+    haptic('light')
+
     await update(ref(db, `rooms/${roomCode}/turn`), {
       phase: 'mindset_voting',
       'mindset/answer': answer,
       phaseStartedAt: Date.now(),
     })
-    setTimeout(async () => {
+
+    window.setTimeout(async () => {
       const snap = await get(ref(db, `rooms/${roomCode}/turn`))
-      const t = snap.val()
-      if (t?.phase === 'mindset_voting') await resolveMindset(t)
+      const turn = snap.val()
+      if (turn?.phase === 'mindset_voting') await resolveMindset(turn)
     }, 20000)
   }
 
-  async function voteMindset(v) {
+  async function voteMindset(value) {
     if (isMyTurn || phase !== 'mindset_voting') return
-    await update(ref(db, `rooms/${roomCode}/turn/mindset/votes`), { [user.id]: v })
+    haptic('light')
+
+    await update(ref(db, `rooms/${roomCode}/turn/mindset/votes`), { [user.id]: value })
     const snap = await get(ref(db, `rooms/${roomCode}/turn`))
-    const t = snap.val()
-    const voterCount = room.playerOrder.filter(p => p !== currentPlayerId).length
-    if (Object.keys(t.mindset?.votes || {}).length >= voterCount) {
-      await resolveMindset(t)
+    const turn = snap.val()
+    const voterCount = room.playerOrder.filter(playerId => playerId !== currentPlayerId).length
+    if (Object.keys(turn.mindset?.votes || {}).length >= voterCount) {
+      await resolveMindset(turn)
     }
   }
 
   async function resolveMindset(turnState) {
     const votes = Object.values(turnState.mindset?.votes || {})
-    const correct = votes.filter(v => v === 'correct').length
-    const wrong = votes.filter(v => v === 'wrong').length
-    const isCorrect = correct >= wrong
-
-    const delta = isCorrect ? 2 : -1
+    const correct = votes.filter(value => value === 'correct').length
+    const isCorrect = correct >= votes.filter(value => value === 'wrong').length
+    const influenceDelta = isCorrect ? 2 : -1
     const cityDelta = isCorrect ? 1 : -1
 
     await update(ref(db, `rooms/${roomCode}`), {
       cityLevel: Math.max(0, Math.min(20, (room.cityLevel || 10) + cityDelta)),
-      [`players/${currentPlayerId}/influence`]: Math.max(0, (room.players[currentPlayerId]?.influence || 0) + delta),
+      [`players/${currentPlayerId}/influence`]: Math.max(0, (room.players[currentPlayerId]?.influence || 0) + influenceDelta),
       'turn/phase': 'resolving',
       'turn/mindset/result': isCorrect ? 'correct' : 'wrong',
-      'turn/influenceDelta': delta,
+      'turn/influenceDelta': influenceDelta,
       'turn/cityDelta': cityDelta,
       'turn/phaseStartedAt': Date.now(),
     })
   }
 
-  if (loading) return <div className="loading-screen"><div className="spinner" /><p>Подключаемся...</p></div>
-  if (!room) return <div className="loading-screen"><p>Комната не найдена</p></div>
+  function renderPhaseBody() {
+    if (!room) return null
+
+    if (phase === 'rolling') {
+      if (isMyTurn) {
+        return <DicePanel dice={room.turn?.dice} onRoll={handleRoll} isMyTurn />
+      }
+
+      return (
+        <div className="waiting-action">
+          <div className="spinner-sm" />
+          <span>{currentPlayerData?.name} готовит бросок кубиков</span>
+        </div>
+      )
+    }
+
+    if ((phase === 'reading_card' || phase === 'challenge_window') && room.turn?.card) {
+      return (
+        <CardPanel
+          card={room.turn.card}
+          phase={phase}
+          isMyTurn={isMyTurn}
+          declaredPath={room.turn?.declaredPath}
+          onDeclare={room.turn?.card?.type === 'opportunity' ? resolveOpportunity : declarePath}
+          onChallenge={challengePath}
+          room={room}
+          userId={user.id}
+        />
+      )
+    }
+
+    if (phase === 'challenging') {
+      return (
+        <ChallengePanel
+          turn={room.turn}
+          isMyTurn={isMyTurn}
+          userId={user.id}
+          onRespond={respondToChallenge}
+        />
+      )
+    }
+
+    if (phase === 'voting') {
+      return (
+        <ChallengePanel
+          turn={room.turn}
+          isMyTurn={isMyTurn}
+          userId={user.id}
+          onVote={vote}
+          isVoting
+        />
+      )
+    }
+
+    if (phase === 'buying') {
+      return (
+        <DistrictPanel
+          cellId={districtCell?.id}
+          room={room}
+          isMyTurn={isMyTurn}
+          onBuy={buyDistrict}
+          onSkip={skipBuying}
+        />
+      )
+    }
+
+    if (phase === 'mindset_answer') {
+      return <MindsetPanel turn={room.turn} isMyTurn={isMyTurn} onSubmit={submitMindsetAnswer} />
+    }
+
+    if (phase === 'mindset_voting') {
+      return (
+        <MindsetPanel
+          turn={room.turn}
+          isMyTurn={isMyTurn}
+          userId={user.id}
+          onVote={voteMindset}
+          isVoting
+        />
+      )
+    }
+
+    if (phase === 'resolving') {
+      return (
+        <div className="result-card">
+          <div className="result-icon">
+            {room.turn?.card?.type === 'crisis' ? '🔥' : room.turn?.pathResult === 'B' ? '✅' : room.turn?.pathResult === 'A' ? '⚠️' : '🎲'}
+          </div>
+          <div className="result-title">
+            {room.turn?.card?.type === 'crisis'
+              ? 'Кризис ударил по городу'
+              : room.turn?.resultTitle || `Путь ${room.turn?.resolvedPath || ''}`}
+          </div>
+          <p className="result-text">
+            {room.turn?.card?.type === 'crisis'
+              ? 'Город потерял 2 уровня, а каждый игрок лишился 1 влияния.'
+              : room.turn?.resultText || 'Результат шага зафиксирован. Можно передавать ход дальше.'}
+          </p>
+          <div className="result-deltas">
+            <span className={room.turn?.influenceDelta >= 0 ? 'positive' : 'negative'}>
+              {room.turn?.influenceDelta >= 0 ? '+' : ''}{room.turn?.influenceDelta} 💫
+            </span>
+            <span className={room.turn?.cityDelta >= 0 ? 'positive' : 'negative'}>
+              {room.turn?.cityDelta >= 0 ? '+' : ''}{room.turn?.cityDelta} 🏙️
+            </span>
+          </div>
+          {isMyTurn && (
+            <button className="btn btn-primary" onClick={finishResolving}>
+              Передать ход
+            </button>
+          )}
+        </div>
+      )
+    }
+
+    return (
+      <div className="waiting-action">
+        <div className="spinner-sm" />
+        <span>Подготавливаем следующий этап хода...</span>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="loading-screen">
+        <div className="spinner" />
+        <p>Подключаемся к комнате...</p>
+      </div>
+    )
+  }
+
+  if (!room) {
+    return (
+      <div className="loading-screen">
+        <p>Комната не найдена</p>
+      </div>
+    )
+  }
 
   if (error) {
     return (
-      <div className="game-screen">
-        <div className="error-panel">
-          <div className="error-icon">⚠️</div>
-          <h3>Произошла ошибка</h3>
-          <p>{error}</p>
-          <button className="btn btn-primary" onClick={() => setError('')}>
-            Закрыть
-          </button>
+      <div className="game-layout screen-fade-in">
+        <div className="centered-shell">
+          <div className="error-panel">
+            <div className="error-icon">⚠️</div>
+            <h3>Ошибка</h3>
+            <p>{error}</p>
+            <button className="btn btn-primary" onClick={() => setError('')}>Закрыть</button>
+          </div>
         </div>
       </div>
     )
@@ -500,156 +681,84 @@ export default function GameScreen({ roomCode, user, onGameOver }) {
     )
   }
 
-  const currentPlayerData = room.players?.[currentPlayerId]
-  const myData = room.players?.[user.id]
-  const phaseLabel = PHASE_LABELS[phase] || 'Игровая фаза'
-
   return (
-    <div className="game-screen">
-      <CityTrack level={room.cityLevel || 10} />
-
-      <PlayerList
-        players={room.players}
-        order={room.playerOrder}
-        currentPlayerId={currentPlayerId}
-        myId={user.id}
-      />
-
-      <BoardStrip
-        myPosition={myData?.position || 0}
-        players={room.players}
-        order={room.playerOrder}
-        districts={room.districts || {}}
-        currentPlayerId={currentPlayerId}
-        myId={user.id}
-      />
-
-      <div className="turn-indicator">
-        {isMyTurn
-          ? <span className="my-turn-badge">🎯 Твой ход</span>
-          : <span className="other-turn-badge">⏳ Ход: {currentPlayerData?.name}</span>
-        }
-      </div>
-
-      <div className={`action-area phase-${phase || 'idle'}`}>
-        <div className="phase-ribbon">
+    <div className="game-layout screen-fade-in">
+      <header className="game-header-zone">
+        <div className="game-header-row">
           <div>
-            <p className="phase-kicker">Сейчас происходит</p>
-            <h3>{phaseLabel}</h3>
+            <p className="eyebrow">Матч #{roomCode}</p>
+            <h1>Наш Город</h1>
           </div>
-          <span className="phase-step">
-            Ход {room.turnNumber || 1} · игрок {room.currentTurnIndex + 1}/{room.playerOrder.length}
-          </span>
+          <button
+            className={`sound-toggle ${soundEnabled ? 'is-on' : 'is-off'}`}
+            onClick={() => {
+              haptic('light')
+              setSoundEnabled(value => !value)
+            }}
+          >
+            {soundEnabled ? 'Звук: вкл' : 'Звук: выкл'}
+          </button>
         </div>
-        {phase === 'rolling' && isMyTurn && (
-          <DicePanel dice={room.turn?.dice} onRoll={handleRoll} isMyTurn={isMyTurn} />
-        )}
 
-        {phase === 'rolling' && !isMyTurn && (
-          <div className="waiting-msg">
-            <div className="spinner-sm" />
-            <p>{currentPlayerData?.name} бросает кубик...</p>
-          </div>
-        )}
+        <CityTrack level={room.cityLevel || 10} />
 
-        {(phase === 'reading_card' || phase === 'challenge_window') && room.turn?.card && (
-          <CardPanel
-            card={room.turn.card}
-            phase={phase}
-            isMyTurn={isMyTurn}
-            declaredPath={room.turn?.declaredPath}
-            onDeclare={room.turn?.card?.type === 'opportunity' ? resolveOpportunity : declarePath}
-            onChallenge={challengePath}
-            room={room}
-            userId={user.id}
-          />
-        )}
+        <PlayerList
+          players={room.players}
+          order={room.playerOrder}
+          currentPlayerId={currentPlayerId}
+          myId={user.id}
+        />
+      </header>
 
-        {phase === 'challenging' && (
-          <ChallengePanel
-            turn={room.turn}
-            isMyTurn={isMyTurn}
-            userId={user.id}
-            onRespond={respondToChallenge}
-          />
-        )}
-
-        {phase === 'voting' && (
-          <ChallengePanel
-            turn={room.turn}
-            isMyTurn={isMyTurn}
-            userId={user.id}
-            onVote={vote}
-            isVoting
-          />
-        )}
-
-        {phase === 'buying' && (
-          <DistrictPanel
-            cellId={currentPlayerData?.position}
-            room={room}
-            isMyTurn={isMyTurn}
-            onBuy={buyDistrict}
-            onSkip={skipBuying}
-          />
-        )}
-
-        {phase === 'mindset_answer' && (
-          <MindsetPanel
-            turn={room.turn}
-            isMyTurn={isMyTurn}
-            onSubmit={submitMindsetAnswer}
-          />
-        )}
-
-        {phase === 'mindset_voting' && (
-          <MindsetPanel
-            turn={room.turn}
-            isMyTurn={isMyTurn}
-            userId={user.id}
-            onVote={voteMindset}
-            isVoting
-          />
-        )}
-
-        {phase === 'resolving' && (
-          <div className="resolving-panel">
-            <div className="result-card">
-              {room.turn?.card?.type === 'crisis' && (
-                <>
-                  <div className="result-icon">🔥</div>
-                  <h3>Кризис города!</h3>
-                  <p>Город –2, все –1 Влияния</p>
-                </>
-              )}
-              {room.turn?.card?.type !== 'crisis' && (
-                <>
-                  <div className={`result-icon ${room.turn?.pathResult === 'B' ? 'good' : 'bad'}`}>
-                    {room.turn?.pathResult === 'B' ? '✅' : room.turn?.pathResult === 'A' ? '❌' : '🎲'}
-                  </div>
-                  <h3>{room.turn?.resultTitle || `Путь ${room.turn?.resolvedPath || ''}`}</h3>
-                  {room.turn?.resultText && (
-                    <p className="result-text">{room.turn.resultText}</p>
-                  )}
-                  <div className="result-deltas">
-                    <span className={room.turn?.influenceDelta > 0 ? 'positive' : 'negative'}>
-                      💫 {room.turn?.influenceDelta > 0 ? '+' : ''}{room.turn?.influenceDelta} Влияния
-                    </span>
-                    <span className={room.turn?.cityDelta > 0 ? 'positive' : 'negative'}>
-                      🏙️ {room.turn?.cityDelta > 0 ? '+' : ''}{room.turn?.cityDelta} Город
-                    </span>
-                  </div>
-                </>
-              )}
-              {isMyTurn && (
-                <button className="btn btn-primary" onClick={finishResolving}>
-                  Продолжить →
-                </button>
-              )}
+      <main className="game-map-zone">
+        <section className="game-status-card">
+          <div className="turn-main">
+            <div>
+              <p className="eyebrow">Ход {room.turnNumber || 1}</p>
+              <h2>{isMyTurn ? 'Твой ход' : `Ход игрока ${currentPlayerData?.name || ''}`}</h2>
+            </div>
+            <div className={`turn-badge ${isMyTurn ? 'mine' : ''}`}>
+              {room.currentTurnIndex + 1}/{room.playerOrder.length}
             </div>
           </div>
-        )}
+          <p className="turn-description">{phaseMeta.note}</p>
+        </section>
+
+        <BoardStrip
+          players={room.players}
+          order={room.playerOrder}
+          districts={room.districts || {}}
+          currentPlayerId={currentPlayerId}
+          myId={user.id}
+        />
+      </main>
+
+      <div className="game-dock">
+        <div className="game-dock-copy">
+          <p className="eyebrow">Активная сцена</p>
+          <strong>{phaseMeta.title}</strong>
+          <span>{isMyTurn ? 'У тебя есть действие' : 'Следи за ходом соперника'}</span>
+        </div>
+        <button className="btn btn-secondary game-dock-toggle" onClick={() => setSheetOpen(value => !value)}>
+          {sheetOpen ? 'Свернуть' : 'Открыть'}
+        </button>
       </div>
+
+      <PhaseSheet
+        title={phaseMeta.title}
+        subtitle={phaseMeta.note}
+        dockOpen={sheetOpen}
+        onToggle={() => setSheetOpen(value => !value)}
+      >
+        {renderPhaseBody()}
+      </PhaseSheet>
+
+      {diceToast !== null && (
+        <div className="dice-toast">
+          <div className="dice-toast-num">{diceToast}</div>
+          <div className="dice-toast-sub">шагов вперёд</div>
+        </div>
+      )}
     </div>
   )
 }

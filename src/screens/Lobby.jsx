@@ -2,40 +2,69 @@ import { useState } from 'react'
 import { db, ref, set } from '../firebase'
 import { generateRoomCode } from '../game/logic'
 import { safeGet, safeUpdate, getErrorMessage } from '../firebase-utils'
+import { haptic } from '../telegram'
 
-const GAME_GUIDE = [
+const GUIDE_CARDS = [
   {
     title: 'Цель игры',
-    text: 'Набрать больше всех Влияния к финалу партии и не дать городу опуститься до нуля.',
+    text: 'Набрать больше всех влияния и не дать городу обрушиться до нуля.',
+    delay: '0.85s',
   },
   {
     title: 'Как проходит ход',
-    text: 'Игрок бросает кубики, попадает на клетку и принимает решение по карточке, району или событию.',
+    text: 'Бросок кубиков, движение по карте, решение по клетке и переход к следующему игроку.',
+    delay: '1s',
   },
   {
     title: 'Как победить',
-    text: 'Игра длится 7 ходов на каждого. Высокий уровень города усиливает итоговый результат.',
+    text: 'Игра длится 7 ходов на игрока. Высокий уровень города усиливает итоговый результат.',
+    delay: '1.15s',
+  },
+  {
+    title: 'Что важно помнить',
+    text: 'Районы приносят аренду, карты дают риск и шанс, а спорные решения влияют на всех.',
+    delay: '1.3s',
   },
 ]
 
-const SYMBOLS = [
-  '⚡ Проблема: нужно выбрать реакцию.',
-  '🌱 Возможность: шанс на бонус или усиление.',
-  '🧠 Сбой мышления: ответь на вопрос и докажи свою позицию.',
-  '🧭 Развилка: сложное решение с последствиями.',
-]
+function CitySkyline() {
+  return (
+    <div className="city-skyline-wrap">
+      <svg className="city-skyline-svg" viewBox="0 0 340 80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <line x1="0" y1="78" x2="340" y2="78" stroke="rgba(245,200,66,0.25)" strokeWidth="1" className="building" style={{ '--delay': '0.7s', pathLength: 1 }} />
+        <path d="M8 78 L8 42 L28 42 L28 78" className="building" style={{ '--delay': '0.75s' }} />
+        <path d="M8 78 L8 42 L28 42 L28 78" className="building-fill" style={{ '--fill-delay': '1.8s' }} />
+        <path d="M56 78 L56 20 L80 20 L80 78" className="building" style={{ '--delay': '0.78s' }} />
+        <path d="M56 78 L56 20 L80 20 L80 78" className="building-fill" style={{ '--fill-delay': '1.75s' }} />
+        <path d="M108 78 L108 38 L132 38 L132 78" className="building" style={{ '--delay': '0.79s' }} />
+        <path d="M108 78 L108 38 L132 38 L132 78" className="building-fill" style={{ '--fill-delay': '1.78s' }} />
+        <path d="M140 78 L140 10 L190 10 L190 78" className="building" style={{ '--delay': '0.73s' }} />
+        <path d="M140 78 L140 10 L190 10 L190 78" className="building-fill" style={{ '--fill-delay': '1.7s' }} />
+        <path d="M158 10 L165 2 L172 10" className="building" style={{ '--delay': '0.8s' }} />
+        <path d="M194 78 L194 32 L218 32 L218 78" className="building" style={{ '--delay': '0.79s' }} />
+        <path d="M194 78 L194 32 L218 32 L218 78" className="building-fill" style={{ '--fill-delay': '1.78s' }} />
+        <path d="M246 78 L246 22 L268 22 L268 78" className="building" style={{ '--delay': '0.77s' }} />
+        <path d="M246 78 L246 22 L268 22 L268 78" className="building-fill" style={{ '--fill-delay': '1.76s' }} />
+        <path d="M294 78 L294 44 L314 44 L314 78" className="building" style={{ '--delay': '0.81s' }} />
+        <path d="M294 78 L294 44 L314 44 L314 78" className="building-fill" style={{ '--fill-delay': '1.81s' }} />
+      </svg>
+    </div>
+  )
+}
 
 export default function Lobby({ user, onJoin }) {
   const [mode, setMode] = useState(null)
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [showGuide, setShowGuide] = useState(true)
 
   async function createRoom() {
+    haptic('medium')
     setLoading(true)
     setError('')
+
     const roomCode = generateRoomCode()
+
     try {
       await set(ref(db, `rooms/${roomCode}`), {
         status: 'waiting',
@@ -60,8 +89,10 @@ export default function Lobby({ user, onJoin }) {
   }
 
   async function joinRoom() {
-    const c = code.trim().toUpperCase()
-    if (c.length < 4) {
+    haptic('medium')
+    const roomCode = code.trim().toUpperCase()
+
+    if (roomCode.length < 4) {
       setError('Введи код комнаты')
       return
     }
@@ -70,7 +101,7 @@ export default function Lobby({ user, onJoin }) {
     setError('')
 
     try {
-      const snap = await safeGet(`rooms/${c}`)
+      const snap = await safeGet(`rooms/${roomCode}`)
       if (!snap.exists()) {
         setError('Комната не найдена')
         setLoading(false)
@@ -84,12 +115,12 @@ export default function Lobby({ user, onJoin }) {
         return
       }
       if (Object.keys(room.players || {}).length >= 8) {
-        setError('Комната заполнена (макс. 8)')
+        setError('Комната уже заполнена')
         setLoading(false)
         return
       }
 
-      await safeUpdate(`rooms/${c}/players/${user.id}`, {
+      await safeUpdate(`rooms/${roomCode}/players/${user.id}`, {
         id: user.id,
         name: user.name,
         photo: user.photo || null,
@@ -97,136 +128,111 @@ export default function Lobby({ user, onJoin }) {
         position: 0,
         pathBCount: 0,
       })
-      onJoin(c)
+      onJoin(roomCode)
     } catch (e) {
       setError(getErrorMessage(e))
       setLoading(false)
     }
   }
 
+  function resetMode() {
+    haptic('light')
+    setMode(null)
+    setCode('')
+    setError('')
+  }
+
   return (
-    <div className="lobby-screen">
-      <div className="lobby-header">
-        <div className="brand-lockup">
-          <div className="brand-wordmark-box">
-            <div className="brand-overline">community movement game</div>
-            <div className="brand-wordmark-row">
-              <div className="brand-wordmark">ZHANA</div>
-              <div className="brand-wordmark brand-wordmark-accent">ADAMDAR</div>
-            </div>
-          </div>
-          <div className="brand-mark-card">
-            <span className="brand-mark-text">ZA</span>
-            <span className="brand-mark-subtext">city play</span>
+    <div className="lobby-screen screen-fade-in">
+      <section className="lobby-hero">
+        <div className="logo-wrap">
+          <div className="brand-overline">community movement game</div>
+          <div className="brand-wordmark-row">
+            <span className="brand-wordmark">ZHANA</span>
+            <span className="brand-wordmark brand-wordmark-accent">ADAMDAR</span>
           </div>
         </div>
-        <div className="hero-kicker">Жаңа Адамдар · городская настольная игра</div>
-        <h1>Наш Город</h1>
-        <p className="subtitle">
-          Ход за ходом вы решаете, что важнее: личное влияние, устойчивость города или риск ради прорыва.
-        </p>
-      </div>
+
+        <CitySkyline />
+
+        <div className="hero-copy">
+          <p className="eyebrow">Telegram Mini App</p>
+          <h1>Наш Город</h1>
+          <p className="t-body">
+            Ход за ходом вы строите влияние, спорите о решениях и держите город в рабочем состоянии.
+          </p>
+        </div>
+      </section>
 
       <div className="hero-badges">
         <span className="hero-badge">2–8 игроков</span>
-        <span className="hero-badge">7 раундов на каждого</span>
-        <span className="hero-badge">Желтый + фиолетовый стиль</span>
+        <span className="hero-badge">7 раундов</span>
+        <span className="hero-badge">Жаңа Адамдар</span>
       </div>
 
-      <div className="player-greeting">
-        Привет, <strong>{user.name}</strong>
-      </div>
+      <section className="lobby-guide-section">
+        <div className="guide-section-label">Как играть</div>
+        {GUIDE_CARDS.map(card => (
+          <article key={card.title} className="guide-card" style={{ animationDelay: card.delay, animationFillMode: 'both' }}>
+            <h3>{card.title}</h3>
+            <p>{card.text}</p>
+          </article>
+        ))}
+      </section>
 
-      <div className="lobby-guide-card">
-        <div className="guide-card-header">
-          <div>
-            <p className="guide-kicker">Перед стартом</p>
-            <h2>Что это за игра</h2>
+      <section className="lobby-actions">
+        {!mode && (
+          <>
+            <button className="btn btn-primary btn-lg btn-glow" onClick={() => { haptic('light'); setMode('create') }}>
+              Создать игру
+            </button>
+            <button className="btn btn-secondary btn-lg join-door-trigger" onClick={() => { haptic('light'); setMode('join') }}>
+              Войти по коду
+            </button>
+          </>
+        )}
+
+        {mode === 'create' && (
+          <div className="lobby-panel">
+            <p className="eyebrow">Новая комната</p>
+            <h2>Открой свой стол</h2>
+            <p className="hint">Хост получает код комнаты и сразу попадает в лобби ожидания.</p>
+            {error && <div className="error-msg">{error}</div>}
+            <button className="btn btn-primary" onClick={createRoom} disabled={loading}>
+              {loading ? 'Создаём...' : 'Создать комнату'}
+            </button>
+            <button className="btn-inline-link" onClick={resetMode}>Назад</button>
           </div>
-          <button className="btn btn-ghost" onClick={() => setShowGuide(v => !v)}>
-            {showGuide ? 'Скрыть' : 'Показать'}
-          </button>
-        </div>
+        )}
 
-        <p className="hint">
-          Это цифровая монополия про городские решения: вы ходите по карте, тянете карточки и спорите о том,
-          что действительно полезно для города.
-        </p>
-
-        {showGuide && (
-          <div className="guide-grid">
-            {GAME_GUIDE.map(item => (
-              <div key={item.title} className="guide-item">
-                <h3>{item.title}</h3>
-                <p>{item.text}</p>
-              </div>
-            ))}
-
-            <div className="guide-item guide-item-wide">
-              <h3>Что означают клетки</h3>
-              <div className="rules-content">
-                {SYMBOLS.map(line => (
-                  <p key={line}>{line}</p>
-                ))}
-              </div>
+        {mode === 'join' && (
+          <div className="join-door-wrap open">
+            <div className="lobby-panel join-panel">
+              <p className="eyebrow">Код комнаты</p>
+              <h2>Открой дверь в игру</h2>
+              <p className="hint">Введи код от хоста, и приложение подключит тебя к общей комнате.</p>
+              <input
+                className="code-input"
+                type="text"
+                placeholder="ABCD12"
+                value={code}
+                onChange={event => setCode(event.target.value.toUpperCase())}
+                maxLength={8}
+                autoFocus
+              />
+              {error && <div className="error-msg">{error}</div>}
+              <button className="btn btn-primary" onClick={joinRoom} disabled={loading || code.length < 4}>
+                {loading ? 'Подключаемся...' : 'Войти в комнату'}
+              </button>
+              <button className="btn-inline-link" onClick={resetMode}>Назад</button>
             </div>
           </div>
         )}
-      </div>
+      </section>
 
-      {!mode && (
-        <div className="lobby-actions">
-          <button className="btn btn-primary btn-lg" onClick={() => setMode('create')}>
-            ✨ Создать игру
-          </button>
-          <button className="btn btn-secondary btn-lg" onClick={() => setMode('join')}>
-            🔗 Войти по коду
-          </button>
-        </div>
-      )}
-
-      {mode === 'create' && (
-        <div className="lobby-panel">
-          <h2>Новая комната</h2>
-          <p className="hint">
-            Ты создашь стол для партии и получишь код. Отправь его друзьям и начинайте, когда все зайдут.
-          </p>
-          {error && <div className="error-msg">{error}</div>}
-          <div className="lobby-btns">
-            <button className="btn btn-primary" onClick={createRoom} disabled={loading}>
-              {loading ? 'Создаем...' : '🚀 Создать'}
-            </button>
-            <button className="btn btn-ghost" onClick={() => { setMode(null); setError('') }}>
-              Назад
-            </button>
-          </div>
-        </div>
-      )}
-
-      {mode === 'join' && (
-        <div className="lobby-panel">
-          <h2>Войти в игру</h2>
-          <p className="hint">Введи код, который тебе прислали, и присоединись к партии.</p>
-          <input
-            className="code-input"
-            type="text"
-            placeholder="ABCD12"
-            value={code}
-            onChange={e => setCode(e.target.value.toUpperCase())}
-            maxLength={8}
-            autoFocus
-          />
-          {error && <div className="error-msg">{error}</div>}
-          <div className="lobby-btns">
-            <button className="btn btn-primary" onClick={joinRoom} disabled={loading}>
-              {loading ? 'Подключаем...' : '▶️ Войти'}
-            </button>
-            <button className="btn btn-ghost" onClick={() => { setMode(null); setCode(''); setError('') }}>
-              Назад
-            </button>
-          </div>
-        </div>
-      )}
+      <p className="lobby-user">
+        В игре ты будешь отображаться как <strong>{user.name}</strong>
+      </p>
     </div>
   )
 }

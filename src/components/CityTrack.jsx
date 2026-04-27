@@ -1,20 +1,22 @@
 export default function CityTrack({ level }) {
   const pct = (level / 20) * 100
-  const color = level >= 13 ? '#10B981' : level >= 8 ? '#F59E0B' : level >= 4 ? '#EF4444' : '#991B1B'
-  const label = level >= 15 ? '🌟 Расцвет' : level >= 10 ? '✅ Стабильно' : level >= 5 ? '⚠️ Под угрозой' : '🔥 Критично!'
+  const color = level >= 13 ? '#34D399' : level >= 8 ? '#F5C842' : level >= 4 ? '#F97316' : '#EF4444'
+  const label = level >= 15 ? 'Рост' : level >= 10 ? 'Стабильно' : level >= 5 ? 'Под давлением' : 'Критично'
 
   return (
-    <div className="city-track">
-      <div className="city-track-header">
-        <span className="city-label">🏙️ Уровень города</span>
-        <span className="city-value" style={{ color }}>{level}/20 {label}</span>
+    <section className="city-track-compact">
+      <div className="city-track-row">
+        <div>
+          <p className="eyebrow">Уровень города</p>
+          <h2 className="city-track-title">{level}/20</h2>
+        </div>
+        <span className="city-value-tag" style={{ color }}>
+          {label}
+        </span>
       </div>
       <div className="city-bar-bg">
-        <div
-          className="city-bar-fill"
-          style={{ width: `${pct}%`, backgroundColor: color, transition: 'width 0.5s, background-color 0.5s' }}
-        />
+        <div className="city-bar-fill" style={{ width: `${pct}%`, background: color }} />
       </div>
-    </div>
+    </section>
   )
 }
