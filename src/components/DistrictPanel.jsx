@@ -1,14 +1,15 @@
 import { useState } from 'react'
 import { BOARD, DISTRICT_CONFIG } from '../data/board'
 import { haptic } from '../telegram'
+import GameIcon from './GameIcon'
 
 const GROUP_META = {
-  1: { icon: '🏠', label: 'Спальный район', color: '#60A5FA' },
-  2: { icon: '🛍️', label: 'Рынок', color: '#F97316' },
-  3: { icon: '🏫', label: 'Школьный квартал', color: '#34D399' },
-  4: { icon: '🏢', label: 'Деловой центр', color: '#818CF8' },
-  5: { icon: '🏛️', label: 'Площадь', color: '#14B8A6' },
-  6: { icon: '🎓', label: 'Кампус', color: '#F472B6' },
+  1: { label: 'Спальный район', color: '#60A5FA' },
+  2: { label: 'Рынок', color: '#F97316' },
+  3: { label: 'Школьный квартал', color: '#34D399' },
+  4: { label: 'Деловой центр', color: '#818CF8' },
+  5: { label: 'Площадь', color: '#14B8A6' },
+  6: { label: 'Кампус', color: '#F472B6' },
 }
 
 export default function DistrictPanel({ cellId, room, isMyTurn, onBuy, onSkip }) {
@@ -36,7 +37,7 @@ export default function DistrictPanel({ cellId, room, isMyTurn, onBuy, onSkip })
     return (
       <div className="sheet-section">
         <div className="district-hero" style={{ '--district-accent': meta.color }}>
-          <div className="district-icon">{meta.icon}</div>
+          <div className="district-icon"><GameIcon type="district" /></div>
           <div>
             <p className="sheet-kicker">{meta.label}</p>
             <h3 className="sheet-title">{cell.name}</h3>
@@ -53,7 +54,7 @@ export default function DistrictPanel({ cellId, room, isMyTurn, onBuy, onSkip })
   return (
     <div className="sheet-section district-panel">
       <div className="district-hero" style={{ '--district-accent': meta.color }}>
-        <div className="district-icon">{meta.icon}</div>
+        <div className="district-icon"><GameIcon type="district" /></div>
         <div>
           <p className="sheet-kicker">{meta.label}</p>
           <h3 className="sheet-title">{cell.name}</h3>
@@ -66,22 +67,10 @@ export default function DistrictPanel({ cellId, room, isMyTurn, onBuy, onSkip })
       </div>
 
       <div className="sheet-grid">
-        <div className="sheet-stat">
-          <span>Аренда</span>
-          <strong>{district.rent} 💫</strong>
-        </div>
-        <div className="sheet-stat">
-          <span>Монополия</span>
-          <strong>{district.monopolyRent} 💫</strong>
-        </div>
-        <div className="sheet-stat">
-          <span>У тебя</span>
-          <strong>{influence} 💫</strong>
-        </div>
-        <div className="sheet-stat">
-          <span>После покупки</span>
-          <strong>{influence - district.price} 💫</strong>
-        </div>
+        <div className="sheet-stat"><span>Аренда</span><strong>{district.rent} 💫</strong></div>
+        <div className="sheet-stat"><span>Монополия</span><strong>{district.monopolyRent} 💫</strong></div>
+        <div className="sheet-stat"><span>У тебя</span><strong>{influence} 💫</strong></div>
+        <div className="sheet-stat"><span>После покупки</span><strong>{influence - district.price} 💫</strong></div>
       </div>
 
       {!canAfford && (
