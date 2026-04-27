@@ -11,7 +11,7 @@ export const PLAYER_COLORS = [
 const GROUP_META = {
   1: { name: 'Спальный район', short: 'Жилой', color: '#60A5FA' },
   2: { name: 'Рынок', short: 'Рынок', color: '#F97316' },
-  3: { name: 'Школьный квартал', short: 'Школы', color: '#34D399' },
+  3: { name: 'Школы', short: 'Школы', color: '#34D399' },
   4: { name: 'Деловой центр', short: 'Центр', color: '#818CF8' },
   5: { name: 'Площадь', short: 'Площадь', color: '#14B8A6' },
   6: { name: 'Кампус', short: 'Кампус', color: '#F472B6' },
@@ -21,29 +21,20 @@ const TYPE_META = {
   start: { label: 'Старт', short: 'Старт', color: '#F5C842' },
   problem: { label: 'Проблема', short: 'Риск', color: '#EF4444' },
   opportunity: { label: 'Возможность', short: 'Шанс', color: '#34D399' },
-  mindset: { label: 'Сбой мышления', short: 'Майндсет', color: '#A78BFA' },
+  mindset: { label: 'Сбой мышления', short: 'Мышление', color: '#A78BFA' },
   fork: { label: 'Развилка', short: 'Выбор', color: '#F59E0B' },
   crisis: { label: 'Кризис', short: 'Кризис', color: '#DC2626' },
 }
 
 const TYPE_DESCRIPTIONS = {
-  start: 'Стартовая точка. За полный круг игрок получает +2 влияния.',
-  district: 'Городской район. Его можно купить и зарабатывать на посещениях.',
-  problem: 'Напряжённая ситуация для города. Нужно выбрать путь действия.',
-  opportunity: 'Редкое окно роста. Может дать бонус тебе или городу.',
-  mindset: 'Проверка мышления и аргументации. Остальные оценивают ответ.',
-  fork: 'Развилка с долгими последствиями. Решение влияет на весь темп партии.',
-  crisis: 'Кризисный удар по городу и по участникам сразу.',
+  start: 'Стартовая точка. За круг игрок получает +2 влияния.',
+  district: 'Городской район. Его можно купить и получать аренду.',
+  problem: 'Проблема города. Нужно выбрать, как действовать дальше.',
+  opportunity: 'Шанс ускорить развитие себя или города.',
+  mindset: 'Проверка мышления и аргументации игрока.',
+  fork: 'Развилка с риском и долгими последствиями.',
+  crisis: 'Общий кризис, который бьет по всем сразу.',
 }
-
-const CELL_LAYOUT = [
-  { x: 10, y: 81 }, { x: 17, y: 83 }, { x: 24, y: 84 }, { x: 32, y: 85 }, { x: 40, y: 84 }, { x: 49, y: 83 },
-  { x: 58, y: 82 }, { x: 67, y: 81 }, { x: 75, y: 79 }, { x: 83, y: 75 }, { x: 89, y: 68 }, { x: 92, y: 59 },
-  { x: 93, y: 49 }, { x: 91, y: 39 }, { x: 87, y: 30 }, { x: 81, y: 22 }, { x: 73, y: 17 }, { x: 64, y: 14 },
-  { x: 55, y: 13 }, { x: 46, y: 14 }, { x: 37, y: 15 }, { x: 28, y: 18 }, { x: 20, y: 23 }, { x: 14, y: 30 },
-  { x: 10, y: 38 }, { x: 8, y: 47 }, { x: 8, y: 56 }, { x: 10, y: 65 }, { x: 17, y: 72 }, { x: 25, y: 76 },
-  { x: 34, y: 77 }, { x: 44, y: 78 }, { x: 54, y: 77 }, { x: 64, y: 74 }, { x: 73, y: 70 }, { x: 81, y: 64 },
-]
 
 function getCellMeta(cell) {
   if (cell.type === 'district') {
@@ -67,6 +58,7 @@ function getCellMeta(cell) {
 
 function buildRoute(from, to) {
   if (from === to) return [to]
+
   const steps = []
   let current = from
   while (current !== to) {
@@ -115,6 +107,7 @@ export default function BoardStrip({ players, order, districts, currentPlayerId,
   const [animatedPositions, setAnimatedPositions] = useState({})
   const previousPositionsRef = useRef({})
   const timersRef = useRef([])
+  const ribbonRef = useRef(null)
 
   const realPositions = useMemo(() => {
     const next = {}
@@ -165,7 +158,7 @@ export default function BoardStrip({ players, order, districts, currentPlayerId,
     })
 
     previousPositionsRef.current = realPositions
-  }, [realPositions, order])
+  }, [order, realPositions])
 
   const pinsByCell = useMemo(() => {
     const next = {}
@@ -186,10 +179,12 @@ export default function BoardStrip({ players, order, districts, currentPlayerId,
     return next
   }, [animatedPositions, currentPlayerId, myId, order, players, realPositions])
 
-  const activePosition = animatedPositions[currentPlayerId] ?? realPositions[currentPlayerId] ?? 0
-  const activeCoords = CELL_LAYOUT[activePosition]
-  const activeColorIndex = order?.findIndex(pid => pid === currentPlayerId) ?? 0
-  const activeColor = PLAYER_COLORS[(activeColorIndex + PLAYER_COLORS.length) % PLAYER_COLORS.length]
+  useEffect(() => {
+    if (!ribbonRef.current || currentPlayerId == null) return
+    const activePosition = animatedPositions[currentPlayerId] ?? realPositions[currentPlayerId] ?? 0
+    const targetX = Math.max(0, 48 + activePosition * 92 - ribbonRef.current.clientWidth / 2)
+    ribbonRef.current.scrollTo({ left: targetX, behavior: 'smooth' })
+  }, [animatedPositions, currentPlayerId, realPositions])
 
   return (
     <>
@@ -197,89 +192,79 @@ export default function BoardStrip({ players, order, districts, currentPlayerId,
         <div className="city-board-top">
           <div>
             <p className="eyebrow">Карта города</p>
-            <h2 className="board-title">Живой контур районов</h2>
+            <h2 className="board-title">Городской маршрут</h2>
           </div>
-          <p className="board-subtitle">Теперь поле работает как вытянутый городской массив, а не как ровный квадратный планшет.</p>
+          <p className="board-subtitle">Продолговатое поле с крупными точками. Тап по клетке открывает детали снизу.</p>
         </div>
 
         <div className="city-zones">
-          {Object.entries(GROUP_META).map(([id, group]) => (
-            <span key={id} className="zone-pill" style={{ '--zone-accent': group.color }}>
+          {Object.values(GROUP_META).map(group => (
+            <span key={group.short} className="zone-pill" style={{ '--zone-accent': group.color }}>
               <i />
               <strong>{group.short}</strong>
             </span>
           ))}
         </div>
 
-        <div className="city-map-shell">
-          <div className="city-map-shape">
-            <div className="city-map-glow city-map-glow-a" />
-            <div className="city-map-glow city-map-glow-b" />
+        <div className="board-ribbon-shell" ref={ribbonRef}>
+          <div className="board-ribbon-track">
+            <div className="board-ribbon-line" />
+            <div className="board-ribbon-halo board-ribbon-halo-a" />
+            <div className="board-ribbon-halo board-ribbon-halo-b" />
 
-            <div className="district-mass mass-center" />
-            <div className="district-mass mass-market" />
-            <div className="district-mass mass-campus" />
-
-            <div className="city-map-center">
-              <div className="city-center-badge">ZHANA ADAMDAR</div>
-              <h3>Наш Город</h3>
-              <p>Неровный, живой, конфликтный. Игровое поле теперь воспринимается как настоящий городской силуэт.</p>
-            </div>
-
-            {BOARD.map(cell => {
-              const coords = CELL_LAYOUT[cell.id]
+            {BOARD.map((cell, index) => {
               const meta = getCellMeta(cell)
-              const playersHere = pinsByCell[cell.id] || []
               const ownerId = districts?.[cell.id]?.owner
               const ownerName = ownerId ? players?.[ownerId]?.name : null
+              const peopleHere = pinsByCell[cell.id] || []
+              const isTop = index % 4 === 0 || index % 4 === 1
+              const x = 48 + index * 92
+              const y = isTop ? 88 : 212
 
               return (
                 <button
                   key={cell.id}
-                  className={`city-node ${cell.type === 'district' ? `district-group-${cell.group}` : `type-${cell.type}`}`}
+                  className={`board-stop ${isTop ? 'is-top' : 'is-bottom'} ${peopleHere.some(pin => pin.isCurrent) ? 'is-active' : ''}`}
                   style={{
-                    left: `${coords.x}%`,
-                    top: `${coords.y}%`,
-                    '--node-accent': meta.color,
+                    left: `${x}px`,
+                    top: `${y}px`,
+                    '--stop-accent': meta.color,
                   }}
                   onClick={() => {
                     haptic('light')
                     setSelectedCell({ ...cell, ownerName })
                   }}
                 >
-                  <span className="city-node-index">{cell.id + 1}</span>
-                  <span className="city-node-icon"><GameIcon type={meta.iconType} /></span>
-                  <span className="city-node-title">{meta.short}</span>
-                  <span className="city-node-caption">{cell.name}</span>
-                  {ownerName && <span className="city-node-owner">{ownerName}</span>}
-                  {playersHere.length > 0 && <span className="city-node-people">{playersHere.length}</span>}
+                  <span className="board-stop-index">{cell.id + 1}</span>
+                  <span className="board-stop-icon"><GameIcon type={meta.iconType} /></span>
+                  <span className="board-stop-title">{meta.short}</span>
+                  <span className="board-stop-name">{cell.name}</span>
+                  {ownerName && <span className="board-stop-owner">{ownerName}</span>}
+                  {peopleHere.length > 0 && <span className="board-stop-badge">{peopleHere.length}</span>}
                 </button>
               )
             })}
 
-            {activeCoords && (
-              <div
-                className="active-node-ring"
-                style={{
-                  left: `${activeCoords.x}%`,
-                  top: `${activeCoords.y}%`,
-                  '--ring-color': activeColor,
-                }}
-              />
-            )}
+            <div className="board-ribbon-center">
+              <div className="city-center-badge">ZHANA ADAMDAR</div>
+              <h3>Наш Город</h3>
+              <p>Маршрут идёт через кварталы, рынок, школы, кризисы и развилки. Всё теперь читается как городская линия решений.</p>
+            </div>
 
             {Object.entries(pinsByCell).flatMap(([cellId, pins]) => {
-              const coords = CELL_LAYOUT[cellId]
+              const index = Number(cellId)
+              const isTop = index % 4 === 0 || index % 4 === 1
+              const x = 48 + index * 92
+              const y = isTop ? 163 : 137
+
               return pins.map((pin, pinIndex) => (
                 <div
                   key={pin.id}
-                  className={`board-pin ${pin.isCurrent ? 'is-current' : ''} ${pin.isMe ? 'is-me' : ''}`}
+                  className={`board-pin ${pin.isCurrent ? 'is-current' : ''}`}
                   style={{
-                    left: `${coords.x}%`,
-                    top: `${coords.y}%`,
+                    left: `${x + (pinIndex % 2) * 18}px`,
+                    top: `${y + Math.floor(pinIndex / 2) * 18}px`,
                     '--pin-color': pin.color,
-                    '--pin-offset-x': `${(pinIndex % 2) * 18 - 9}px`,
-                    '--pin-offset-y': `${Math.floor(pinIndex / 2) * 18 - 8}px`,
                   }}
                   title={pin.name}
                 >
